@@ -257,9 +257,11 @@ function generateProxyConfig(options: {
         return 301 ${basePath}/;
     }
     
-    # All paths under base path
+    # All paths under base path (with or without trailing slash)
     location ${basePath}/ {
-        proxy_pass http://localhost:${port}/;
+        # Strip the base path before proxying
+        rewrite ^${basePath}/(.*)$ /$1 break;
+        proxy_pass http://localhost:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -299,9 +301,11 @@ function generateMonorepoConfig(options: {
         return 301 ${backendBasePath}/;
     }
     
-    # Backend proxy - all paths under base path
+    # Backend proxy - all paths under base path (with or without trailing slash)
     location ${backendBasePath}/ {
-        proxy_pass http://localhost:${port}/;
+        # Strip the base path before proxying
+        rewrite ^${backendBasePath}/(.*)$ /$1 break;
+        proxy_pass http://localhost:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
