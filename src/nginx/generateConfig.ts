@@ -259,9 +259,8 @@ function generateProxyConfig(options: {
     
     # All paths under base path (with or without trailing slash)
     location ${basePath}/ {
-        # Strip the base path before proxying
-        rewrite ^${basePath}/(.*)$ /$1 break;
-        proxy_pass http://localhost:${port};
+        # Strip the base path before proxying (trailing slash in proxy_pass does the stripping)
+        proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -303,9 +302,8 @@ function generateMonorepoConfig(options: {
     
     # Backend proxy - all paths under base path (with or without trailing slash)
     location ${backendBasePath}/ {
-        # Strip the base path before proxying
-        rewrite ^${backendBasePath}/(.*)$ /$1 break;
-        proxy_pass http://localhost:${port};
+        # Strip the base path before proxying (trailing slash in proxy_pass does the stripping)
+        proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
