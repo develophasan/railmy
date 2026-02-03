@@ -89,9 +89,25 @@ export async function generateNginxConfig(
     throw new Error(`Desteklenmeyen proje tipi: ${projectType}`);
   }
 
-  // Config dosyasını yaz
-  await fs.writeFile(configPath, configContent);
-  logger.success(`Nginx config oluşturuldu: ${configPath}`, 'nginx');
+  // Config dosyasını geçici olarak yaz, sonra sudo ile kopyala
+  const tempConfigPath = path.join('/tmp', `${safeName}.nginx.conf`);
+  await fs.writeFile(tempConfigPath, configContent);
+  
+  try {
+    // Sudo ile kopyala
+    await execa('sudo', ['cp', tempConfigPath, configPath], {
+      stdio: 'pipe'
+    });
+    await fs.remove(tempConfigPath);
+    logger.success(`Nginx config oluşturuldu: ${configPath}`, 'nginx');
+  } catch (error: any) {
+    // Sudo başarısız olursa, geçici dosyayı bırak ve kullanıcıya bildir
+    logger.warn(
+      `Nginx config sudo ile kopyalanamadı. Manuel kopyalama gerekebilir: ${tempConfigPath} -> ${configPath}`,
+      'nginx'
+    );
+    throw new Error(`Nginx config write failed: ${error.message}`);
+  }
 
   // Nginx syntax kontrolü
   try {

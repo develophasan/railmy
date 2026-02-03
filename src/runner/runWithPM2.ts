@@ -148,10 +148,14 @@ function generateEcosystemConfig(options: {
 }): string {
   const { name, script, cwd, envFile, port, logPath } = options;
 
+  // PM2 shell komutları için interpreter kullan
+  const isShellCommand = script.includes('npm') || script.includes('pnpm') || script.includes('yarn');
+  
   return `module.exports = {
   apps: [{
     name: '${name}',
     script: '${script}',
+    ${isShellCommand ? `interpreter: 'bash',` : ''}
     cwd: '${cwd}',
     env_file: '${envFile}',
     instances: 1,
