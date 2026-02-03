@@ -293,7 +293,8 @@ function generateMonorepoConfig(options: {
   const { serverName, port, frontendStaticDir, backendBasePath, frontendBasePath } = options;
 
   let config = `server {
-    listen 80;
+    listen 80 default_server;
+    listen [::]:80 default_server;
     server_name ${serverName};
 
     # Backend proxy - exact match for base path
