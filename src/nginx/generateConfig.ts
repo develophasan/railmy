@@ -257,10 +257,10 @@ function generateProxyConfig(options: {
         return 301 ${basePath}/;
     }
     
-    # All paths under base path (regex for reliable path stripping)
-    location ~ ^${basePath.replace(/\//g, '\\/')}/(.*)$ {
-        rewrite ^${basePath.replace(/\//g, '\\/')}/(.*)$ /$1 break;
-        proxy_pass http://localhost:${port};
+    # All paths under base path (prefix location with trailing slash)
+    location ${basePath}/ {
+        # Trailing slash in proxy_pass automatically strips the matched prefix
+        proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -300,10 +300,10 @@ function generateMonorepoConfig(options: {
         return 301 ${backendBasePath}/;
     }
     
-    # Backend proxy - all paths under base path (regex for reliable path stripping)
-    location ~ ^${backendBasePath.replace(/\//g, '\\/')}/(.*)$ {
-        rewrite ^${backendBasePath.replace(/\//g, '\\/')}/(.*)$ /$1 break;
-        proxy_pass http://localhost:${port};
+    # Backend proxy - all paths under base path (prefix location with trailing slash)
+    location ${backendBasePath}/ {
+        # Trailing slash in proxy_pass automatically strips the matched prefix
+        proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
