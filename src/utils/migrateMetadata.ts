@@ -47,15 +47,19 @@ export async function migrateExistingProjects(): Promise<void> {
       // PM2 yoksa veya hata varsa devam et
     }
     
-    // Nginx config path'ini bul
+    // Nginx config path'ini bul ve base path'i oku
     let nginxConfigPath: string | undefined;
+    let basePath = '/';
     try {
-      const { stdout } = await execa('sudo', ['ls', '/etc/nginx/conf.d/'], { 
-        shell: true 
-      });
-      const configs = stdout.split('\n').filter(f => f.includes(entry));
-      if (configs.length > 0) {
-        nginxConfigPath = `/etc/nginx/conf.d/${configs[0]}`;
+      const configPath = `/etc/nginx/conf.d/${entry}.conf`;
+      if (await fs.pathExists(configPath)) {
+        nginxConfigPath = configPath;
+        // Base path'i config'den oku
+        const configContent = await fs.readFile(configPath, 'utf-8');
+        const basePathMatch = configContent.match(/location\s+([^\s\/]+)\//);
+        if (basePathMatch && basePathMatch[1] !== '=') {
+          basePath = `/${basePathMatch[1]}`;
+        }
       }
     } catch (error) {
       // Hata varsa devam et
@@ -72,15 +76,54 @@ export async function migrateExistingProjects(): Promise<void> {
         }
       }
       
-      // .env dosyasından port oku
+      // .env dosyasından port oku (customer dizininde de kontrol et)
       if (!port) {
-        const envPath = path.join(projectPath, '.env');
-        if (await fs.pathExists(envPath)) {
-          const envContent = await fs.readFile(envPath, 'utf-8');
-          const portMatch = envContent.match(/PORT=(\d+)/);
+        const envPaths = [
+          path.join(projectPath, '.env'),
+          path.join(projectPath, 'customer', '.env')
+        ];
+        
+        for (const envPath of envPaths) {
+          if (await fs.pathExists(envPath)) {
+            const envContent = await fs.readFile(envPath, 'utf-8');
+            const portMatch = envContent.match(/PORT=(\d+)/);
+            if (portMatch) {
+              port = parseInt(portMatch[1]);
+              break;
+            }
+          }
+        }
+      }
+      
+      // PM2 ecosystem config'den port oku
+      if (!port) {
+        const ecosystemPaths = [
+          path.join(projectPath, 'ecosystem.config.js'),
+          path.join(projectPath, 'customer', 'ecosystem.config.js')
+        ];
+        
+        for (const ecosystemPath of ecosystemPaths) {
+          if (await fs.pathExists(ecosystemPath)) {
+            const ecosystemContent = await fs.readFile(ecosystemPath, 'utf-8');
+            const portMatch = ecosystemContent.match(/PORT['":\s]*(\d+)/);
+            if (portMatch) {
+              port = parseInt(portMatch[1]);
+              break;
+            }
+          }
+        }
+      }
+      
+      // Nginx config'den port oku (proxy_pass'ten)
+      if (!port && nginxConfigPath) {
+        try {
+          const configContent = await fs.readFile(nginxConfigPath, 'utf-8');
+          const portMatch = configContent.match(/proxy_pass\s+http:\/\/localhost:(\d+)/);
           if (portMatch) {
             port = parseInt(portMatch[1]);
           }
+        } catch (error) {
+          // Hata varsa devam et
         }
       }
     } catch (error) {
@@ -139,7 +182,7 @@ export async function migrateExistingProjects(): Promise<void> {
         branch: branch,
         type: projectType,
         port: port,
-        basePath: '/',
+        basePath: basePath,
         createdAt: now,
         updatedAt: now,
         pm2ProcessName,
