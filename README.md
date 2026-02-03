@@ -81,14 +81,31 @@ npm start deploy \
   --port 3000
 ```
 
-### Diğer Komutlar
+### Proje Yönetimi
 
 ```bash
-# PM2 process durumunu görüntüle
-npm start status
+# Tüm deploy edilmiş projeleri listele
+raillmy list
+
+# Belirli bir projenin durumunu kontrol et
+raillmy status --name my-project
+
+# Tüm PM2 process'lerini görüntüle
+raillmy status
 
 # Proje loglarını görüntüle
-npm start logs --name my-project --lines 200
+raillmy logs --name my-project --lines 200
+raillmy logs --name my-project --type build
+raillmy logs --name my-project --type runtime
+raillmy logs --name my-project --type pm2
+
+# Projeyi güncelle (repo pull + restart)
+raillmy update --name my-project
+raillmy update --name my-project --branch develop
+
+# Projeyi kaldır
+raillmy remove --name my-project
+raillmy remove --name my-project --force  # Onay istemeden sil
 ```
 
 ## 📁 Proje Yapısı
@@ -182,10 +199,18 @@ Hata durumunda:
 - [x] Backend deploy
 - [x] Frontend deploy (static + SSR)
 - [x] Monorepo desteği
+- [x] Proje listeleme (list)
+- [x] Proje silme (remove)
+- [x] Proje güncelleme (update)
+- [x] Status komutu
+- [x] Logs komutu
+- [x] Metadata yönetimi
 - [ ] GitHub webhook entegrasyonu
 - [ ] Basit web dashboard
 - [ ] Multi-server desteği
 - [ ] Rollback mekanizması
+- [ ] Health check endpoint'leri
+- [ ] Otomatik backup
 
 ## 📝 Lisans
 

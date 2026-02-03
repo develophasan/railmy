@@ -12,6 +12,9 @@ import { ProjectType, DeployConfig, DeployResult } from './types/index.js';
 import { sanitizeProjectName } from './utils/security.js';
 import { getBuildLogPath, getRuntimeLogPath } from './utils/paths.js';
 import { findAvailablePort } from './utils/portFinder.js';
+import { saveMetadata, loadMetadata, listAllProjects, deleteMetadata, updateMetadata } from './utils/metadata.js';
+import { APPS_DIR } from './utils/paths.js';
+import fs from 'fs-extra';
 import path from 'path';
 
 const program = new Command();
@@ -174,6 +177,21 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
     logger.info('🔄 Adım 7/7: Nginx reload ediliyor...', 'deploy');
     await reloadNginx();
 
+    // 8. Metadata kaydet
+    const now = new Date().toISOString();
+    await saveMetadata({
+      name: config.projectName,
+      repoUrl: config.repoUrl,
+      branch: config.branch,
+      type: analysis.type,
+      port: finalPort,
+      basePath: config.basePath || '/',
+      createdAt: now,
+      updatedAt: now,
+      pm2ProcessName,
+      nginxConfigPath
+    });
+
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     logger.success(`✅ Deploy başarıyla tamamlandı! (${duration}s)`, 'deploy');
 
@@ -324,16 +342,78 @@ program
   });
 
 program
-  .command('status')
-  .description('Check deployment status')
-  .option('--name <name>', 'Project name')
+  .command('list')
+  .description('List all deployed projects')
   .action(async () => {
     try {
-      const { execa } = await import('execa');
-      const result = await execa('pm2', ['list'], { stdio: 'inherit' });
-      process.exit(result.exitCode);
+      const projects = await listAllProjects();
+      
+      if (projects.length === 0) {
+        console.log('📭 Deploy edilmiş proje bulunamadı.');
+        return;
+      }
+      
+      console.log(`\n📦 Deploy Edilmiş Projeler (${projects.length}):\n`);
+      console.log('┌─────────────────────┬──────────────────────────────────────┬──────────┬───────┬─────────────┬─────────────────────┐');
+      console.log('│ İsim                │ Repo                                │ Tip      │ Port  │ Base Path   │ Güncellenme         │');
+      console.log('├─────────────────────┼──────────────────────────────────────┼──────────┼───────┼─────────────┼─────────────────────┤');
+      
+      for (const project of projects) {
+        const name = project.name.padEnd(19);
+        const repo = (project.repoUrl.length > 38 ? project.repoUrl.substring(0, 35) + '...' : project.repoUrl).padEnd(36);
+        const type = project.type.padEnd(8);
+        const port = (project.port?.toString() || '-').padEnd(5);
+        const basePath = project.basePath.padEnd(11);
+        const updated = new Date(project.updatedAt).toLocaleDateString('tr-TR').padEnd(19);
+        
+        console.log(`│ ${name} │ ${repo} │ ${type} │ ${port} │ ${basePath} │ ${updated} │`);
+      }
+      
+      console.log('└─────────────────────┴──────────────────────────────────────┴──────────┴───────┴─────────────┴─────────────────────┘');
     } catch (error: any) {
-      console.error(`PM2 status hatası: ${error.message}`);
+      logger.error('List hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('status')
+  .description('Check deployment status')
+  .option('--name <name>', 'Project name (shows all if not specified)')
+  .action(async (options) => {
+    try {
+      if (options.name) {
+        // Belirli bir projenin durumunu göster
+        const metadata = await loadMetadata(options.name);
+        if (!metadata) {
+          console.error(`❌ Proje bulunamadı: ${options.name}`);
+          process.exit(1);
+        }
+        
+        const { execa } = await import('execa');
+        
+        console.log(`\n📊 Proje Durumu: ${metadata.name}\n`);
+        console.log(`📁 Repo: ${metadata.repoUrl}`);
+        console.log(`🌿 Branch: ${metadata.branch}`);
+        console.log(`🔌 Port: ${metadata.port || 'N/A'}`);
+        console.log(`🌐 Base Path: ${metadata.basePath}`);
+        console.log(`📅 Oluşturulma: ${new Date(metadata.createdAt).toLocaleString('tr-TR')}`);
+        console.log(`🔄 Güncellenme: ${new Date(metadata.updatedAt).toLocaleString('tr-TR')}\n`);
+        
+        if (metadata.pm2ProcessName) {
+          console.log('⚙️  PM2 Durumu:');
+          await execa('pm2', ['describe', metadata.pm2ProcessName], { stdio: 'inherit' });
+        }
+      } else {
+        // Tüm PM2 process'lerini göster
+        const { execa } = await import('execa');
+        const result = await execa('pm2', ['list'], { stdio: 'inherit' });
+        process.exit(result.exitCode);
+      }
+    } catch (error: any) {
+      logger.error('Status hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
       process.exit(1);
     }
   });
@@ -343,21 +423,168 @@ program
   .description('View project logs')
   .requiredOption('--name <name>', 'Project name')
   .option('--lines <number>', 'Number of lines', '100')
+  .option('--type <type>', 'Log type (build|runtime|pm2)', 'runtime')
   .action(async (options) => {
     try {
+      const metadata = await loadMetadata(options.name);
+      if (!metadata) {
+        console.error(`❌ Proje bulunamadı: ${options.name}`);
+        process.exit(1);
+      }
+      
       const { execa } = await import('execa');
-      const processName = sanitizeProjectName(options.name);
-      const result = await execa(
-        'pm2',
-        ['logs', processName, '--lines', options.lines],
-        { stdio: 'inherit' }
-      );
-      process.exit(result.exitCode);
+      
+      if (options.type === 'pm2' && metadata.pm2ProcessName) {
+        await execa('pm2', ['logs', metadata.pm2ProcessName, '--lines', options.lines], { stdio: 'inherit' });
+      } else if (options.type === 'build') {
+        const buildLog = getBuildLogPath(options.name);
+        await execa('tail', ['-n', options.lines, buildLog], { stdio: 'inherit' });
+      } else {
+        const runtimeLog = getRuntimeLogPath(options.name);
+        await execa('tail', ['-n', options.lines, runtimeLog], { stdio: 'inherit' });
+      }
     } catch (error: any) {
-      console.error(`Log görüntüleme hatası: ${error.message}`);
+      logger.error('Logs hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
       process.exit(1);
     }
   });
+
+program
+  .command('remove')
+  .alias('delete')
+  .description('Remove a deployed project')
+  .requiredOption('--name <name>', 'Project name')
+  .option('--force', 'Force removal without confirmation', false)
+  .action(async (options) => {
+    try {
+      const metadata = await loadMetadata(options.name);
+      if (!metadata) {
+        console.error(`❌ Proje bulunamadı: ${options.name}`);
+        process.exit(1);
+      }
+      
+      if (!options.force) {
+        console.log(`\n⚠️  Bu işlem şunları silecek:`);
+        console.log(`   - PM2 process: ${metadata.pm2ProcessName || 'N/A'}`);
+        console.log(`   - Nginx config: ${metadata.nginxConfigPath || 'N/A'}`);
+        console.log(`   - Proje dosyaları: ${path.join(APPS_DIR, options.name)}`);
+        console.log(`\nDevam etmek istiyor musunuz? (y/N)`);
+        
+        // Basit confirmation (gerçek uygulamada readline kullanılabilir)
+        const readline = await import('readline');
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        
+        const answer = await new Promise<string>((resolve) => {
+          rl.question('', resolve);
+        });
+        rl.close();
+        
+        if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+          console.log('❌ İşlem iptal edildi.');
+          return;
+        }
+      }
+      
+      console.log(`\n🗑️  Proje kaldırılıyor: ${options.name}...\n`);
+      
+      // 1. PM2 process'i durdur ve sil
+      if (metadata.pm2ProcessName) {
+        try {
+          const { execa } = await import('execa');
+          await execa('pm2', ['delete', metadata.pm2ProcessName]);
+          console.log(`✅ PM2 process silindi: ${metadata.pm2ProcessName}`);
+        } catch (error: any) {
+          logger.warn(`PM2 process silinemedi: ${error.message}`, 'remove');
+        }
+      }
+      
+      // 2. Nginx config'i sil
+      if (metadata.nginxConfigPath) {
+        try {
+          const { execa } = await import('execa');
+          await execa('sudo', ['rm', '-f', metadata.nginxConfigPath]);
+          await execa('sudo', ['nginx', '-s', 'reload']);
+          console.log(`✅ Nginx config silindi: ${metadata.nginxConfigPath}`);
+        } catch (error: any) {
+          logger.warn(`Nginx config silinemedi: ${error.message}`, 'remove');
+        }
+      }
+      
+      // 3. Proje dizinini sil
+      const projectPath = path.join(APPS_DIR, options.name);
+      try {
+        await fs.remove(projectPath);
+        console.log(`✅ Proje dizini silindi: ${projectPath}`);
+      } catch (error: any) {
+        logger.warn(`Proje dizini silinemedi: ${error.message}`, 'remove');
+      }
+      
+      // 4. Metadata'yı sil
+      await deleteMetadata(options.name);
+      
+      console.log(`\n✅ Proje başarıyla kaldırıldı: ${options.name}`);
+    } catch (error: any) {
+      logger.error('Remove hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('update')
+  .description('Update a deployed project (pull latest changes and restart)')
+  .requiredOption('--name <name>', 'Project name')
+  .option('--branch <branch>', 'Git branch to pull', 'main')
+  .action(async (options) => {
+    try {
+      const metadata = await loadMetadata(options.name);
+      if (!metadata) {
+        console.error(`❌ Proje bulunamadı: ${options.name}`);
+        process.exit(1);
+      }
+      
+      console.log(`\n🔄 Proje güncelleniyor: ${options.name}...\n`);
+      
+      const { execa } = await import('execa');
+      
+      // 1. Repo'yu güncelle
+      console.log('📥 Repo güncelleniyor...');
+      await cloneRepo({
+        repoUrl: metadata.repoUrl,
+        branch: options.branch || metadata.branch,
+        projectName: options.name,
+        force: false
+      });
+      console.log('✅ Repo güncellendi');
+      
+      // 2. Bağımlılıkları yeniden kur (opsiyonel - hızlı update için atlanabilir)
+      // Burada basit bir update yapıyoruz, full rebuild için deploy komutunu kullanın
+      
+      // 3. PM2 process'i restart et
+      if (metadata.pm2ProcessName) {
+        console.log('🔄 PM2 process yeniden başlatılıyor...');
+        await execa('pm2', ['restart', metadata.pm2ProcessName]);
+        console.log('✅ PM2 process yeniden başlatıldı');
+      }
+      
+      // 4. Metadata'yı güncelle
+      await updateMetadata(options.name, {
+        branch: options.branch || metadata.branch,
+        updatedAt: new Date().toISOString()
+      });
+      
+      console.log(`\n✅ Proje başarıyla güncellendi: ${options.name}`);
+    } catch (error: any) {
+      logger.error('Update hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
 
 // CLI'yi çalıştır
 program.parse();
