@@ -60,12 +60,18 @@ export async function runWithPM2(options: RunOptions): Promise<string> {
 
   // PM2 ecosystem dosyası oluştur
   const ecosystemPath = path.join(workDir, 'ecosystem.config.js');
+  const { script: startScript, envVars: scriptEnvVars } = await getStartScript(packageManager, analysis, workDir);
+  
+  // Script'ten gelen env var'ları birleştir
+  const allEnvVars = { ...envVars, ...scriptEnvVars };
+  
   const ecosystemConfig = generateEcosystemConfig({
     name: processName,
-    script: getStartScript(packageManager, analysis),
+    script: startScript,
     cwd: workDir,
     envFile: envFilePath,
     port,
+    envVars: allEnvVars,
     logPath: getRuntimeLogPath(projectName)
   });
 
@@ -116,22 +122,67 @@ export async function runWithPM2(options: RunOptions): Promise<string> {
 }
 
 /**
- * Start script komutunu oluştur
+ * Start script komutunu oluştur ve environment variable'ları ayır
  */
-function getStartScript(
+async function getStartScript(
   packageManager: PackageManager,
-  analysis: ProjectAnalysis
-): string {
-  const script = analysis.startCommand || 'start';
+  analysis: ProjectAnalysis,
+  workDir: string
+): Promise<{ script: string; envVars: Record<string, string> }> {
+  const envVars: Record<string, string> = {};
+  
+  // package.json'dan start script'ini oku
+  try {
+    const packageJsonPath = path.join(workDir, 'package.json');
+    if (await fs.pathExists(packageJsonPath)) {
+      const packageJson = await fs.readJson(packageJsonPath);
+      const startScript = packageJson.scripts?.start || analysis.startCommand;
+      
+      if (startScript) {
+        // Environment variable'ları ayır (NODE_ENV=prod node src/app.js gibi)
+        let cleanScript = startScript;
+        const envRegex = /^([A-Z_][A-Z0-9_]*)=([^\s]+)\s+/;
+        
+        while (envRegex.test(cleanScript)) {
+          const match = cleanScript.match(envRegex);
+          if (match) {
+            const [, key, value] = match;
+            envVars[key] = value;
+            cleanScript = cleanScript.replace(envRegex, '');
+          }
+        }
+        
+        // Eğer temizlenmiş script direkt node komutu ise
+        if (cleanScript.trim().startsWith('node ') || cleanScript.trim().includes('node ')) {
+          return { script: cleanScript.trim(), envVars };
+        }
+        
+        // npm/pnpm/yarn komutu ise
+        switch (packageManager) {
+          case PackageManager.PNPM:
+            return { script: 'pnpm run start', envVars };
+          case PackageManager.YARN:
+            return { script: 'yarn start', envVars };
+          case PackageManager.NPM:
+          default:
+            return { script: 'npm run start', envVars };
+        }
+      }
+    }
+  } catch (error) {
+    // Hata durumunda varsayılan kullan
+  }
 
+  // Varsayılan: npm run start
+  const script = analysis.startCommand || 'start';
   switch (packageManager) {
     case PackageManager.PNPM:
-      return `pnpm run ${script}`;
+      return { script: `pnpm run ${script}`, envVars };
     case PackageManager.YARN:
-      return `yarn ${script}`;
+      return { script: `yarn ${script}`, envVars };
     case PackageManager.NPM:
     default:
-      return `npm run ${script}`;
+      return { script: `npm run ${script}`, envVars };
   }
 }
 
@@ -144,12 +195,28 @@ function generateEcosystemConfig(options: {
   cwd: string;
   envFile: string;
   port?: number;
+  envVars?: Record<string, string>;
   logPath: string;
 }): string {
-  const { name, script, cwd, envFile, port, logPath } = options;
+  const { name, script, cwd, envFile, port, envVars, logPath } = options;
 
   // PM2 shell komutları için interpreter kullan
   const isShellCommand = script.includes('npm') || script.includes('pnpm') || script.includes('yarn');
+  
+  // Environment variables objesi oluştur
+  const envObj: Record<string, string | number> = {};
+  if (port) {
+    envObj.PORT = port;
+  }
+  if (envVars) {
+    for (const [key, value] of Object.entries(envVars)) {
+      envObj[key] = value;
+    }
+  }
+  
+  const envStr = Object.keys(envObj).length > 0 
+    ? `env: ${JSON.stringify(envObj, null, 2).split('\n').map((line, i) => i === 0 ? line : '      ' + line).join('\n')},`
+    : '';
   
   return `module.exports = {
   apps: [{
@@ -169,7 +236,7 @@ function generateEcosystemConfig(options: {
     autorestart: true,
     max_restarts: 10,
     min_uptime: '10s',
-    ${port ? `env: { PORT: ${port} },` : ''}
+    ${envStr}
   }]
 };
 `;
