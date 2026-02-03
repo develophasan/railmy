@@ -358,8 +358,15 @@ program
 program
   .command('list')
   .description('List all deployed projects')
-  .action(async () => {
+  .option('--migrate', 'Migrate existing projects to metadata system', false)
+  .action(async (options) => {
     try {
+      // Eğer migrate flag'i varsa, eski projeler için metadata oluştur
+      if (options.migrate) {
+        const { migrateExistingProjects } = await import('./utils/migrateMetadata.js');
+        await migrateExistingProjects();
+      }
+      
       const projects = await listAllProjects();
       
       if (projects.length === 0) {
