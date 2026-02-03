@@ -253,7 +253,7 @@ function generateProxyConfig(options: {
     server_name ${serverName};
 
     location ${basePath} {
-        proxy_pass http://localhost:${port}${basePath.endsWith('/') ? '' : '/'};
+        proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -290,7 +290,7 @@ function generateMonorepoConfig(options: {
 
     # Backend proxy
     location ${backendBasePath} {
-        proxy_pass http://localhost:${port}${backendBasePath.endsWith('/') ? '' : '/'};
+        proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
