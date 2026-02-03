@@ -28,6 +28,8 @@ export interface DeployConfig {
   envVars?: Record<string, string>;
   projectName: string;
   basePath?: string; // Nginx için base path (örn: /api)
+  environment?: string; // production, staging, development
+  webhookEnabled?: boolean; // GitHub webhook aktif mi?
 }
 
 /**

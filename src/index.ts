@@ -189,7 +189,9 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
       createdAt: now,
       updatedAt: now,
       pm2ProcessName,
-      nginxConfigPath
+      nginxConfigPath,
+      environment: config.environment || 'production',
+      webhookEnabled: config.webhookEnabled || false
     });
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -244,6 +246,8 @@ program
   .option('--name <name>', 'Project name (auto-generated from repo if not provided)')
   .option('--base-path <path>', 'Nginx base path', '/')
   .option('--env <vars>', 'Environment variables (key=value,key2=value2)')
+  .option('--environment <env>', 'Environment name (production|staging|development)', 'production')
+  .option('--webhook', 'Enable GitHub webhook for auto-deploy', false)
   .action(async (options) => {
     try {
       // Repo URL'den proje adı çıkar
@@ -252,7 +256,15 @@ program
       
       if (!projectName) {
         const urlParts = repoUrl.split('/');
-        projectName = urlParts[urlParts.length - 1].replace('.git', '');
+        const repoName = urlParts[urlParts.length - 1].replace('.git', '');
+        const branch = options.branch || 'main';
+        
+        // Multi-branch desteği: branch adını proje adına ekle (eğer main değilse)
+        if (branch !== 'main' && branch !== 'master') {
+          projectName = `${repoName}-${branch}`;
+        } else {
+          projectName = repoName;
+        }
       }
 
       projectName = sanitizeProjectName(projectName);
@@ -293,7 +305,9 @@ program
         port: options.port,
         envVars,
         projectName,
-        basePath: options.basePath
+        basePath: options.basePath,
+        environment: options.environment,
+        webhookEnabled: options.webhook
       };
 
       const result = await deploy(config);
@@ -369,7 +383,7 @@ program
         console.log(`│ ${name} │ ${repo} │ ${type} │ ${port} │ ${basePath} │ ${updated} │`);
       }
       
-      console.log('└─────────────────────┴──────────────────────────────────────┴──────────┴───────┴─────────────┴─────────────────────┘');
+      console.log('└─────────────────────┴──────────────────────────────────────┴──────────┴──────────┴───────┴─────────────┴─────────────────────┘');
     } catch (error: any) {
       logger.error('List hatası', 'cli', error);
       console.error(`\n❌ Hata: ${error.message}`);
@@ -585,6 +599,179 @@ program
     }
   });
 
+program
+  .command('env')
+  .description('Manage environment variables for a project')
+  .requiredOption('--name <name>', 'Project name')
+  .option('--get <key>', 'Get environment variable value')
+  .option('--set <key=value>', 'Set environment variable')
+  .option('--unset <key>', 'Remove environment variable')
+  .option('--list', 'List all environment variables')
+  .option('--backup', 'Backup environment file')
+  .option('--restore <path>', 'Restore from backup')
+  .action(async (options) => {
+    try {
+      const metadata = await loadMetadata(options.name);
+      if (!metadata) {
+        console.error(`❌ Proje bulunamadı: ${options.name}`);
+        process.exit(1);
+      }
+
+      const { EnvManager } = await import('./utils/envManager.js');
+      const projectPath = path.join(APPS_DIR, options.name);
+      const envManager = new EnvManager(projectPath);
+
+      if (options.get) {
+        const vars = await envManager.getAll();
+        const value = vars[options.get];
+        if (value !== undefined) {
+          console.log(value);
+        } else {
+          console.error(`❌ Environment variable bulunamadı: ${options.get}`);
+          process.exit(1);
+        }
+      } else if (options.set) {
+        const [key, ...valueParts] = options.set.split('=');
+        const value = valueParts.join('='); // = içeren değerler için
+        if (!key || !value) {
+          console.error('❌ Geçersiz format. Kullanım: --set KEY=value');
+          process.exit(1);
+        }
+        await envManager.set(key, value);
+        console.log(`✅ Environment variable ayarlandı: ${key}`);
+        
+        // PM2 process'i restart et
+        if (metadata.pm2ProcessName) {
+          const { execa } = await import('execa');
+          await execa('pm2', ['restart', metadata.pm2ProcessName]);
+          console.log(`✅ PM2 process yeniden başlatıldı`);
+        }
+      } else if (options.unset) {
+        await envManager.unset(options.unset);
+        console.log(`✅ Environment variable silindi: ${options.unset}`);
+        
+        // PM2 process'i restart et
+        if (metadata.pm2ProcessName) {
+          const { execa } = await import('execa');
+          await execa('pm2', ['restart', metadata.pm2ProcessName]);
+          console.log(`✅ PM2 process yeniden başlatıldı`);
+        }
+      } else if (options.list) {
+        const vars = await envManager.getAll();
+        if (Object.keys(vars).length === 0) {
+          console.log('📭 Environment variable bulunamadı.');
+        } else {
+          console.log('\n📋 Environment Variables:\n');
+          for (const [key, value] of Object.entries(vars)) {
+            // Hassas bilgileri gizle
+            const displayValue = key.toLowerCase().includes('secret') || 
+                                key.toLowerCase().includes('password') || 
+                                key.toLowerCase().includes('key')
+              ? '***' : value;
+            console.log(`  ${key}=${displayValue}`);
+          }
+        }
+      } else if (options.backup) {
+        const backupPath = await envManager.backup();
+        console.log(`✅ Backup oluşturuldu: ${backupPath}`);
+      } else if (options.restore) {
+        await envManager.restore(options.restore);
+        console.log(`✅ Backup geri yüklendi: ${options.restore}`);
+        
+        // PM2 process'i restart et
+        if (metadata.pm2ProcessName) {
+          const { execa } = await import('execa');
+          await execa('pm2', ['restart', metadata.pm2ProcessName]);
+          console.log(`✅ PM2 process yeniden başlatıldı`);
+        }
+      } else {
+        console.error('❌ Bir işlem belirtmelisiniz (--get, --set, --unset, --list, --backup, --restore)');
+        process.exit(1);
+      }
+    } catch (error: any) {
+      logger.error('Env komutu hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('health')
+  .description('Check project health status')
+  .option('--name <name>', 'Project name (checks all if not specified)')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      const { checkHealth, checkAllHealth } = await import('./health/healthCheck.js');
+      
+      if (options.name) {
+        const status = await checkHealth(options.name);
+        if (options.json) {
+          console.log(JSON.stringify(status, null, 2));
+        } else {
+          console.log(`\n🏥 Health Status: ${status.projectName}\n`);
+          console.log(`Status: ${status.healthy ? '✅ Healthy' : '❌ Unhealthy'}`);
+          console.log(`PM2: ${status.pm2Status || 'N/A'}`);
+          if (status.port) console.log(`Port: ${status.port}`);
+          if (status.uptime) console.log(`Uptime: ${Math.floor(status.uptime / 1000 / 60)} minutes`);
+          if (status.restarts) console.log(`Restarts: ${status.restarts}`);
+          if (status.memory) console.log(`Memory: ${(status.memory / 1024 / 1024).toFixed(2)} MB`);
+          if (status.cpu) console.log(`CPU: ${status.cpu}%`);
+        }
+      } else {
+        const statuses = await checkAllHealth();
+        if (options.json) {
+          console.log(JSON.stringify(statuses, null, 2));
+        } else {
+          console.log(`\n🏥 Health Status (${statuses.length} projects)\n`);
+          for (const status of statuses) {
+            const icon = status.healthy ? '✅' : '❌';
+            console.log(`${icon} ${status.projectName}: ${status.pm2Status || 'N/A'}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      logger.error('Health komutu hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('webhook')
+  .description('Start GitHub webhook server for auto-deploy')
+  .option('--port <port>', 'Webhook server port', '3003')
+  .option('--secret <secret>', 'Webhook secret (for signature verification)')
+  .option('--path <path>', 'Webhook path', '/webhook')
+  .action(async (options) => {
+    try {
+      const { startWebhookServer } = await import('./webhook/webhookServer.js');
+      
+      await startWebhookServer({
+        port: parseInt(options.port),
+        secret: options.secret,
+        path: options.path
+      });
+      
+      console.log(`\n✅ Webhook server başlatıldı`);
+      console.log(`   Port: ${options.port}`);
+      console.log(`   Path: ${options.path}`);
+      console.log(`   Secret: ${options.secret ? '***' : 'Not set (insecure)'}`);
+      console.log(`\n📝 GitHub webhook URL: http://your-server:${options.port}${options.path}`);
+      console.log(`   Content type: application/json`);
+      console.log(`   Events: push`);
+      
+      // Process'i canlı tut
+      process.on('SIGINT', () => {
+        console.log('\n\n🛑 Webhook server durduruluyor...');
+        process.exit(0);
+      });
+    } catch (error: any) {
+      logger.error('Webhook server hatası', 'cli', error);
+      console.error(`\n❌ Hata: ${error.message}`);
+      process.exit(1);
+    }
+  });
 
 // CLI'yi çalıştır
 program.parse();

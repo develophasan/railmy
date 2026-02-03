@@ -108,6 +108,84 @@ raillmy remove --name my-project
 raillmy remove --name my-project --force  # Onay istemeden sil
 ```
 
+### Environment Variable Yönetimi
+
+```bash
+# Environment variable listele
+raillmy env --name my-project --list
+
+# Environment variable ekle/güncelle
+raillmy env --name my-project --set DATABASE_URL=postgres://localhost:5432/mydb
+raillmy env --name my-project --set API_KEY=secret123
+
+# Environment variable oku
+raillmy env --name my-project --get DATABASE_URL
+
+# Environment variable sil
+raillmy env --name my-project --unset API_KEY
+
+# Environment variable yedekle
+raillmy env --name my-project --backup
+
+# Yedekten geri yükle
+raillmy env --name my-project --restore /path/to/backup
+```
+
+### Health Check
+
+```bash
+# Tüm projelerin health durumunu kontrol et
+raillmy health
+
+# Belirli bir projenin health durumunu kontrol et
+raillmy health --name my-project
+
+# JSON formatında çıktı
+raillmy health --name my-project --json
+```
+
+### GitHub Webhook (Otomatik Deploy)
+
+```bash
+# Webhook server'ı başlat
+raillmy webhook --port 3003 --secret your-secret-key
+
+# Webhook ile deploy (deploy sırasında)
+raillmy deploy --repo https://github.com/user/repo --webhook
+```
+
+GitHub'da webhook ayarları:
+- **URL**: `http://your-server:3003/webhook`
+- **Content type**: `application/json`
+- **Events**: `push`
+- **Secret**: (webhook server'da belirttiğiniz secret)
+
+### Multi-Branch Desteği
+
+```bash
+# Aynı repo'nun farklı branch'lerini deploy et
+raillmy deploy --repo https://github.com/user/api --branch main --name api-production
+raillmy deploy --repo https://github.com/user/api --branch develop --name api-staging
+raillmy deploy --repo https://github.com/user/api --branch feature/new-feature --name api-feature
+
+# Otomatik proje adı: repo-name-branch (main/master hariç)
+raillmy deploy --repo https://github.com/user/api --branch develop
+# → Proje adı: api-develop
+```
+
+### Environment (Staging/Production)
+
+```bash
+# Production ortamı
+raillmy deploy --repo https://github.com/user/api --environment production
+
+# Staging ortamı
+raillmy deploy --repo https://github.com/user/api --environment staging --branch develop
+
+# Development ortamı
+raillmy deploy --repo https://github.com/user/api --environment development --branch dev
+```
+
 ## 📁 Proje Yapısı
 
 ```
@@ -205,12 +283,16 @@ Hata durumunda:
 - [x] Status komutu
 - [x] Logs komutu
 - [x] Metadata yönetimi
-- [ ] GitHub webhook entegrasyonu
+- [x] GitHub webhook entegrasyonu
+- [x] Health check endpoint'leri
+- [x] Environment variable yönetimi
+- [x] Multi-branch desteği
+- [x] Environment (staging/production) desteği
 - [ ] Basit web dashboard
 - [ ] Multi-server desteği
 - [ ] Rollback mekanizması
-- [ ] Health check endpoint'leri
 - [ ] Otomatik backup
+- [ ] Health check otomatik restart
 
 ## 📝 Lisans
 

@@ -14,6 +14,8 @@ export interface ProjectMetadata {
   updatedAt: string;
   pm2ProcessName?: string;
   nginxConfigPath?: string;
+  environment?: string; // 'production', 'staging', 'development'
+  webhookEnabled?: boolean;
 }
 
 const METADATA_FILE = 'metadata.json';
