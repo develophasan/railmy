@@ -11,6 +11,7 @@ import { generateNginxConfig, reloadNginx } from './nginx/generateConfig.js';
 import { ProjectType, DeployConfig, DeployResult } from './types/index.js';
 import { sanitizeProjectName } from './utils/security.js';
 import { getBuildLogPath, getRuntimeLogPath } from './utils/paths.js';
+import { findAvailablePort } from './utils/portFinder.js';
 import path from 'path';
 
 const program = new Command();
@@ -22,6 +23,16 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
   const startTime = Date.now();
   logger.setProject(config.projectName);
   logger.info(`🚀 Deploy başlatılıyor: ${config.projectName}`, 'deploy');
+
+  // Port kontrolü ve otomatik port bulma
+  let finalPort = config.port;
+  if (finalPort) {
+    const availablePort = await findAvailablePort(finalPort);
+    if (availablePort !== finalPort) {
+      logger.warn(`Port ${finalPort} kullanımda, ${availablePort} portu kullanılıyor`, 'deploy');
+      finalPort = availablePort;
+    }
+  }
 
   let projectPath: string = '';
   let pm2ProcessName: string | undefined;
@@ -132,7 +143,7 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
           packageManager: analysis.packageManager,
           analysis: backendAnalysis,
           projectName: config.projectName,
-          port: config.port,
+          port: finalPort,
           envVars: config.envVars,
           subPath: analysis.backendPath
         });
@@ -142,7 +153,7 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
           packageManager: analysis.packageManager,
           analysis,
           projectName: config.projectName,
-          port: config.port,
+          port: finalPort,
           envVars: config.envVars
         });
       }
@@ -155,7 +166,7 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
       projectPath,
       projectType: analysis.type,
       analysis,
-      port: config.port,
+      port: finalPort,
       basePath: config.basePath
     });
 
@@ -169,7 +180,7 @@ async function deploy(config: DeployConfig): Promise<DeployResult> {
     return {
       success: true,
       projectPath,
-      port: config.port,
+      port: finalPort,
       nginxConfigPath,
       pm2ProcessName,
       logs: {
