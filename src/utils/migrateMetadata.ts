@@ -52,14 +52,20 @@ export async function migrateExistingProjects(): Promise<void> {
     let basePath = '/';
     try {
       const configPath = `/etc/nginx/conf.d/${entry}.conf`;
-      if (await fs.pathExists(configPath)) {
+      // Sudo ile config'i oku
+      try {
+        const { stdout } = await execa('sudo', ['cat', configPath]);
         nginxConfigPath = configPath;
         // Base path'i config'den oku
-        const configContent = await fs.readFile(configPath, 'utf-8');
-        const basePathMatch = configContent.match(/location\s+([^\s\/]+)\//);
-        if (basePathMatch && basePathMatch[1] !== '=') {
-          basePath = `/${basePathMatch[1]}`;
+        const basePathMatch = stdout.match(/location\s+([^\s{]+)\//);
+        if (basePathMatch && basePathMatch[1] && basePathMatch[1] !== '=') {
+          const matched = basePathMatch[1].trim();
+          if (matched && matched !== '/') {
+            basePath = matched.startsWith('/') ? matched : `/${matched}`;
+          }
         }
+      } catch (error) {
+        // Config dosyası yoksa veya okunamazsa devam et
       }
     } catch (error) {
       // Hata varsa devam et
@@ -114,11 +120,11 @@ export async function migrateExistingProjects(): Promise<void> {
         }
       }
       
-      // Nginx config'den port oku (proxy_pass'ten)
+      // Nginx config'den port oku (proxy_pass'ten) - sudo ile
       if (!port && nginxConfigPath) {
         try {
-          const configContent = await fs.readFile(nginxConfigPath, 'utf-8');
-          const portMatch = configContent.match(/proxy_pass\s+http:\/\/localhost:(\d+)/);
+          const { stdout } = await execa('sudo', ['cat', nginxConfigPath]);
+          const portMatch = stdout.match(/proxy_pass\s+http:\/\/localhost:(\d+)/);
           if (portMatch) {
             port = parseInt(portMatch[1]);
           }
