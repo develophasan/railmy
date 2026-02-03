@@ -36,7 +36,8 @@ export async function generateNginxConfig(
 
   const configPath = getNginxConfigPath(projectName);
   const safeName = sanitizeProjectName(projectName);
-  const serverName = domain || `${safeName}.local`;
+  // Use _ as default server_name to match all requests (if no domain specified)
+  const serverName = domain || '_';
 
   let configContent: string;
 
