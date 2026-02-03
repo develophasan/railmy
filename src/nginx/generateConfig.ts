@@ -252,7 +252,13 @@ function generateProxyConfig(options: {
     listen 80;
     server_name ${serverName};
 
-    location ${basePath} {
+    # Exact match for base path - redirect to trailing slash
+    location = ${basePath} {
+        return 301 ${basePath}/;
+    }
+    
+    # All paths under base path
+    location ${basePath}/ {
         proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -288,8 +294,13 @@ function generateMonorepoConfig(options: {
     listen 80;
     server_name ${serverName};
 
-    # Backend proxy
-    location ${backendBasePath} {
+    # Backend proxy - exact match for base path
+    location = ${backendBasePath} {
+        return 301 ${backendBasePath}/;
+    }
+    
+    # Backend proxy - all paths under base path
+    location ${backendBasePath}/ {
         proxy_pass http://localhost:${port}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -299,6 +310,11 @@ function generateMonorepoConfig(options: {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
     }
 `;
 
